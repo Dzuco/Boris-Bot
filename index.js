@@ -1,7 +1,6 @@
 // Require the necessary discord.js classes
-const { Client, Intents, MessageAttachment, MessageEmbed } = require('discord.js');
-//const { userMention } = require('@discordjs/builders')
-const { token } = require('./config.json');
+const { Client, Intents, MessageAttachment, MessageEmbed , MessageActionRow, MessageButton} = require('discord.js');
+const { token } = require('./config.json')
 const fetch = require('node-fetch');
 const sharp = require('sharp');
 
@@ -13,6 +12,10 @@ client.once('ready', () => {
 	console.log('Ready!');
 });
 
+// This next array purpose is to help clean code
+// before we had harcoded and too much repeated code
+const imgArray = [[0,0,0],[1,0,256],[2,0,512],[3,256,0],[4,256,256],[5,256,512],[6,512,0],[7,512,256],[8,512,512]];
+
 // this function request craiyon's backend for images
 // backends:
 // https://bf.dallemini.ai/generate
@@ -21,14 +24,31 @@ function promptImage(promptMsg){
   return fetch("https://bf.dallemini.ai/generate",
           { method: 'POST',
             headers: {  
-                Accept: "application/json",
-                "Content-Type": "application/json"
-                      },
+                	Accept: "application/json",
+               		"Content-Type": "application/json"},
             body: JSON.stringify({prompt: promptMsg.trim()})
           })
 }
 
-// This listens to interactions
+function cropImage(imgURL,customId){
+	return fetch(imgURL)
+			.then(res => res.blob())
+			.then(imgBlob => {
+				return imgBlob.arrayBuffer()
+									.then(buff=>{
+										imgBuffer = Buffer.from(buff);
+										imgSize = 256;
+										return sharp(imgBuffer)
+													.extract({	top: parseInt(customId.split('-')[2]),
+																left: parseInt(customId.split('-')[3]),
+																width: imgSize,
+																height: imgSize})
+													.toBuffer()
+									})
+			})
+}
+
+// This listens to interactions type commands
 client.on('interactionCreate', interaction => {
   if(!interaction.isCommand()) return;
 
@@ -40,135 +60,93 @@ client.on('interactionCreate', interaction => {
     let msgreq = interaction.options.getString('prompt');
     
     //print the request to console
-    console.log(`---${interaction.user.username} requested "${msgreq}"`)
+    console.log(`--- ${interaction.user.username} requested "${msgreq}"`)
     
     interaction.reply({content: `*\`...loading\`*`, fetchReply: true })
       .then(lastMsg=> {
-	//console.log(lastMsg);
-	// inital performance take
-	let initTime = performance.now();
-	promptImage(msgreq)
-	  .then(res => {
-	    return res.json()
-	  })
-	  .then((arr)=>{
-		let buffers = []
-	    let files = arr.images
-						.map((img)=>{
-							return new Buffer.from(img, "base64");
-						})
-						.map((buff,index)=>{
-							buffers.push(buff);
-							return new MessageAttachment(buff,`output${index}.png`);
-						});
-						
-		let promptGrid = [];
-		
-		sharp({
-			create:{
-				width: 768,
-				height: 768,
-				channels: 3,
-				background: {r:150,g:150,b:150}
-			}
-		}).composite([
-			{input:buffers[0], top:0,    left:0   },
-			{input:buffers[1], top:0,    left:256 },
-			{input:buffers[2], top:0,    left:512 },
-			{input:buffers[3], top:256,  left:0   },
-			{input:buffers[4], top:256,  left:256 },
-			{input:buffers[5], top:256,  left:512 },
-			{input:buffers[6], top:512,  left:0   },
-			{input:buffers[7], top:512,  left:256 },
-			{input:buffers[8], top:512,  left:512 },
-		])
-		.toFormat('png')
-		//.toFile("./result.png")
-		.toBuffer((err, data, info)=>{
-			//console.log(info);
-			promptGrid = [new MessageAttachment(data,`promptGrid.png`)];
-		});
-		
-		 
-		
-
-	    // let embeds = files   
-		// 				.map((file,index)=>{
-		// 					switch(index){
-		// 						case 0 :
-		// 							return new MessageEmbed()
-		// 							.setTitle(msgreq)
-		// 							.setURL("https://www.google.com")
-		// 							.setImage(`attachment://output${index}.png`)
-		// 							break;
-		// 						case 1 :
-		// 						case 2 :
-		// 						case 3 :
-		// 						case 4 :
-		// 							return new MessageEmbed()
-		// 							.setURL("https://huggingface.co/spaces/dalle-mini/dalle-mini")
-		// 							.setImage(`attachment://output${index}.png`)
-		// 							break;
-		// 						case 5 :
-		// 						case 6 :
-		// 						case 7 :
-		// 						case 8 :
-		// 							return new MessageEmbed()
-		// 							.setURL("https://www.craiyon.com/")
-		// 							.setImage(`attachment://output${index}.png`)
-		// 							break;
-		// 						default :
-		// 							console.log("no images")
-		// 					}      
-		// 				})
-	    // .map((file,index)=>{
-	    //   return (index == 0)?
-	    //   new discord.MessageEmbed()
-	    //     .setTitle(msgreq)
-	    //     .setURL("https://huggingface.co/spaces/dalle-mini/dalle-mini")
-	    //     .setImage(`attachment://output${index}.png`)
-	    //   :
-	    //   new discord.MessageEmbed()
-	    //     .setURL("https://huggingface.co/spaces/dalle-mini/dalle-mini")
-	    //     .setImage(`attachment://output${index}.png`)
-	    // })
-
-	    //return { embeds: embeds, files: files };
-	    interaction.editReply({ content: `*\`formatting\`*`, embeds: [], files: files, fetchReply: true })
-			.then((lastMsg) => {
-				console.log(lastMsg.attachments.map(k=>k.proxyURL));
-				console.log(lastMsg.attachments);
-				console.log(interaction.user.id);
-				let lastAttachURL = lastMsg.attachments.map(k=>k.proxyURL);
-				let numLit = ["one","two","three","four","five","six","seven","eight","nine"];
-				let linksField = lastAttachURL.map((k,index)=>{
-					console.log(`[:${numLit[index]}:](${k})`);
-					return `[:${numLit[index]}:](${k})`
-				}).join(' ');
-				resultEmbed = new MessageEmbed()
-									.setAuthor({name:"DALL•E Mini",iconURL:"https://raw.githubusercontent.com/borisdayma/dalle-mini/main/img/logo.png"})
-									.setTitle('Prompt')
-									.setDescription(`*"${msgreq}"*`)
-									.setColor('#252525')
-									.addFields({
-										name: "Files",
-										value: linksField
+		//console.log(lastMsg);
+		// inital performance mark
+		let initTime = performance.now();
+		promptImage(msgreq)
+			.then(res => {
+				return res.json()
+			})
+			.then((arr)=>{
+				let buffers = arr.images
+									.map((img)=>{
+										return new Buffer.from(img, "base64");
 									})
-									.setImage(`attachment://promptGrid.png`)
-									.setFooter({	text: `requested by ${interaction.user.username}`, 
-													iconURL: `https://cdn.discordapp.com/avatars/${interaction.user.id}/${interaction.user.avatar}.jpg`})
+				
+				const compObjects = imgArray.map(element => {return {input:buffers[element[0]],top:element[1],left:element[2]}});
+				
+				sharp({
+					create:{
+						width: 768,
+						height: 768,
+						channels: 3,
+						background: {r:150,g:150,b:150}
+					}
+				}).composite(compObjects)
+				.toFormat('png')
+				//.toFile("./result.png")
+				.toBuffer((err, data, info)=>{
+					//console.log(info);
+					// since sharp process is async, we need to continue inside this callback
+					// building components for the reply
+					let promptGrid = new MessageAttachment(data,`promptGrid.png`);
+					let resultEmbed = new MessageEmbed()
+										.setAuthor({name:"DALL•E Mini",iconURL:"https://raw.githubusercontent.com/borisdayma/dalle-mini/main/img/logo.png"})
+										.setTitle('Prompt')
+										.setDescription(`*"${msgreq}"*`)
+										.setColor('#252525')
+										.setImage(`attachment://promptGrid.png`)
+										.setFooter({	text: `requested by ${interaction.user.username}`, 
+														iconURL: `https://cdn.discordapp.com/avatars/${interaction.user.id}/${interaction.user.avatar}.jpg`})
+					let buttons = [...imgArray,"10"].map(n=>{
+						return (n == "10")? new MessageButton()
+													.setCustomId('btnVariation')
+													.setLabel('↺')
+													.setStyle('SECONDARY'):
+											new MessageButton()
+													.setCustomId(`btn-${n[0]}-${n[1]}-${n[2]}`)
+													.setLabel(`${n[0]+1}`)
+													.setStyle('SECONDARY')
+					})
+					const row1 = new MessageActionRow().addComponents(buttons.slice(0,5));
+					const row2 = new MessageActionRow().addComponents(buttons.slice(5));		
+															
+					// Calculate Performace
+					let finalTime = performance.now();
+					var timeDiff = finalTime - initTime; 
+					timeDiff /= 1000; 
+					var seconds = Math.round(timeDiff);
 
-				// Calculate Performace
-				let finalTime = performance.now();
-				var timeDiff = finalTime - initTime; 
-				timeDiff /= 1000; 
-				var seconds = Math.round(timeDiff);
-				interaction.editReply({ content: `*\`${seconds} sec elapsed\`*`, embeds:[resultEmbed], files: promptGrid,  fetchReply: true })
-			});
-	  })
+					// Send the final embed
+					interaction.editReply({ content: `*\`${seconds} sec elapsed\`*`, 
+											embeds: [resultEmbed], 
+											files: [promptGrid], 
+											components: [row1, row2], 
+											fetchReply: true })			
+				});
+			})
 	})
   }
 });
+
+client.on('interactionCreate', interaction => {
+	if(!interaction.isButton()) return;
+	let croppedEmbed = interaction.message.embeds[0];
+	const {customId} = interaction;
+	if(customId != "btnVariation"){
+		cropImage(interaction.message.embeds[0].image.url,customId).then(data => {
+			let croppedImg = new MessageAttachment(data,"cropped.png");
+			croppedEmbed.setImage("attachment://cropped.png");
+			interaction.reply({	content: `*\`extracted image ${parseInt(customId.split('-')[1])+1}\`*`, 
+								embeds:[croppedEmbed], 
+								files: [croppedImg]});
+		})
+	}
+})
 
 // Login to Discord with your client's token
 client.login(token);
